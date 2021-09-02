@@ -1,0 +1,66 @@
+#  Makefile.lrss
+#
+#  Makefile for the program Ref/Dif 1, LRSS version.
+#
+#  James T. Kirby
+#  Center for Applied Coastal Research
+#  University of Delaware
+#  Newark, DE 19716
+#  (302) 831-2438, FAX (302) 831-1228
+#  kirby@coastal.udel.edu
+#
+#  The main thing here is that we want to make sure that all programs
+#  are up to date relative to param.h, which is used to dimension arrays
+#  in the main program and in the pre- and post processors
+
+#  Library paths.  It is assumed that libdf.a (for hdf) and libezhdf.a
+#  (for ezhdf, supplied by SAIC) are in /usr/local/lib.  Change the next line
+#  if this is not the case.  (Note that SGI searches /usr/local/lib by
+#  default.
+
+#HDFLIB	= /usr/local/lib
+
+#  Note that commands are included for executing ftangle and fweave for
+#  the web file version of refdif1v25.  If the fortran source is being used as
+#  the starting point rather than the web file, these lines should be removed.
+
+#  Last revision 11/26/94.
+
+
+#  Build everything.
+
+all:  refdif1 lrss2rf rf2hdf 
+
+#  Build REF/DIF 1.
+
+refdif1: refdif1v25.o infile2.o param.h
+	f77 -o refdif1 refdif1v25.o infile2.o -llrss
+refdif1v25.o: refdif1v25.f param.h
+	f77 -c -O refdif1v25.f
+refdif1v25.f: refdif1v25.web
+	ftangle refdif1v25
+#	fweave refdif1v25
+
+#  Build lrss2rf.
+
+lrss2rf:  lrss2rf.o param.h
+	f77 -o lrss2rf lrss2rf.o -lezhdf  -ldf -llrss
+lrss2rf.o: lrss2rf.f
+	f77 -c -O lrss2rf.f
+
+#  Build rf2hdf.
+
+rf2hdf: rf2hdf.o infile2.o param.h
+	f77 -o rf2hdf rf2hdf.o infile2.o -lezhdf -ldf -llrss
+rf2hdf.o: rf2hdf.f
+	f77 -c -O rf2hdf.f
+
+#  Take care of infile2.f
+
+infile2.o: infile2.f
+	f77 -c -O infile2.f
+
+#  Clean up the directory.
+
+clean:
+	rm *.o

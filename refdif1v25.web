@@ -1,0 +1,2115 @@
+@z --- refdif1v25.web
+
+This file contains the source code and documentation for version 2.5
+of REFDIF 1, as of August 1994.
+
+The initial cdamp version of fdcalc (with no-current minimax forms)
+is stored in fdcalc24_old.web.  The new version (extended version 2.3)
+is inserted at 10:47, July 20, 1992.
+Revision to calculation of initial conditions in model subroutine, April 5, 1993.
+
+Changed format for depth grid input back to the original 20f10.4.  3/25/94  JK
+
+Starting development of alpha version of 2.5 on July 7, 1994.  Tasks being 
+addressed are:
+
+(1)   conversion to namelist format for indat.dat file.
+(2)   user specification of all file names.
+(3)   averaging filter for computed waveheights.
+(4)   post-processing for LRSS remote sensing applications.
+
+
+author:  James T. Kirby
+version  2.5
+date:    July 13, 1992, revised April 5, 1993.  2.5alpha started 7/7/94.
+         Last revised 12/21/94.
+
+@x--------------------------------------------------------------------
+@n
+@*  Refraction-Diffraction Model REF/DIF 1, Version \mbox{2.5}.
+
+REF/DIF 1 calculates the forward scattered wave field in regions with slowly 
+varying depth and current, including the effects of refraction and diffraction.  The program is based on the parabolic equation method.  Physical effects included in the present version include:
+
+\begin{enumerate}
+
+\item Parabolic approximation:
+
+\begin{enumerate}
+\item  Minimax approximation given by Kirby (1986b).
+\end{enumerate}    
+
+\item Wave nonlinearity:  choice of
+
+\begin{enumerate}
+\item  Linear.
+\item  Composite nonlinear: approximate model of  Kirby and  Dalrymple (1986b).
+\item  Stokes nonlinear: model of  Kirby and  Dalrymple (1983a).
+\end{enumerate}
+
+\item Wave breaking:
+
+\begin{enumerate}
+\item Model of Dally, Dean and Dalrymple(1985).
+\end{enumerate}
+
+\item Absorbing structures and shorelines:
+
+\begin{enumerate}
+\item Thin film model surrounded by a natural surfzone ( Kirby and  Dalrymple, 1986a).
+\end{enumerate}
+
+\item  Energy dissipation: any of
+
+\begin{enumerate}
+\item Turbulent bottom friction damping.
+\item Porous bottom damping.
+\item Laminar boundary layer damping.
+\end{enumerate}
+
+    
+\item Lateral boundary conditions: either of
+    
+\begin{enumerate}
+\item  Reflective condition.
+\item  Open boundary condition ( Kirby, 1986c).
+\end{enumerate}
+    
+\item Input wave field: either of
+    
+\begin{enumerate}
+\item Model specification of monochromatic or directional wave field.
+\item Input of initial row of data from disk file.
+\end{enumerate}
+    
+\item Output wave field:
+    
+\begin{enumerate}
+\item  Standard output.
+\item  Optional storage of last full calculated row of complex amplitudes.
+\end{enumerate}
+
+\end{enumerate}
+
+\newpage
+    
+The documentation of present program is contained in: \\
+
+{\em Combined Refraction/Diffraction Model REF/DIF 1, Version 2.5, 
+Documentation and User's Manual}\\
+  James T. Kirby and Robert A. Dalrymple\\  
+CACR Report No. 94 - 04 , Center for Applied Coastal Research\\
+Department of Civil Engineering, University of Delaware, July 1994.
+
+
+\begin{center}
+    
+    Center for Applied Coastal Research\\
+    Department of Civil Engineering\\
+    University of Delaware\\
+    Newark, DE 19716
+
+\end{center}
+    
+Program developed by James T. Kirby and Robert A. Dalrymple.
+    
+Version 2.5, Last revision 12/21/94.
+
+
+
+@a
+
+      program refdif1
+    
+      include 'param.h'
+
+@<common statements@>
+
+c  Constants which provide for conversion between MKS and English units
+c  on input and output.
+
+      dconv(1)=1.
+      dconv(2)=0.30488
+    
+
+c  read control parameters and reference grid data
+    
+      call inref
+    
+c  read control parameters and initializing wave data
+    
+      call inwave
+    
+c   Pass program control to subroutine |model|.
+
+c   For each frequency component specified in |inwave|, |model|
+c   executes the model throughout the entire grid and then
+c     reinitializes the model for the next frequency.
+    
+      call model
+  
+c  All done.  Close output data files if |open| and |close| statements are 
+c   being used.
+
+c |outdat|.
+
+      close(iun(3))
+
+c  |surface|.
+
+      if(fname6.ne.'') close(8)
+
+c  |angle|.
+
+      close(9)
+
+c  |refdif1.log|.
+
+      close(10)
+
+c  |height|.
+
+      close(12)
+
+c  |sxx|.
+
+      if(fname12.ne.' ') close(13)
+
+c  |sxy|.
+
+      if(fname13.ne.' ') close(14)
+
+c  |syy|.
+
+      if(fname14.ne.' ') close(15)
+
+c  |depth|.
+
+      close(16)
+
+c  |bottomu|.
+
+      if(fname7.ne.' ') close(17)
+
+c  |owave|.
+
+      if(ioutput.eq.2) close(33)
+
+      stop
+
+      end
+
+  
+@*  INREF. 
+
+Subroutine reads in and checks dimensions and values for large scale reference 
+grid.  Wave parameters for the particular run are read in later by subroutine 
+|inwave|.
+
+The following unit (device) numbers are assumed:
+
+\begin{itemize}
+\item |iun(1)|:   input reference grid values of $d$, $u$, and $v$
+\item |iun(2)|:   Input user specified subgrid divisions from file normally 
+named |subdat.dat|.
+\item |iun(3)|:   Output results at reference grid locations to disk file.
+\item 8: Output image of instantaneous water surface at computational grid
+resolution.  This is interpolated to a regular rectangular grid by the program
+|surface2hdf.f| and stored in HDF file format.  Usual name for file is
+|surface.dat|.
+\item 9: Output results for wave angles in file usually named |angle.dat|.
+\item 10:  Log file |refdif1.log|, containing basic information and error 
+messages.
+\item 11: Input file |wave.dat|, user specifies complex amplitude on first row.
+\item 12: Output results for significant wave height in file usually 
+named |height.dat|.
+\item 13: Output results for rad. stress Sxx in file usually named |sxx.dat|.
+\item 14: Output results for rad. stress Sxy in file usually named |sxy.dat|.
+\item 15: Output results for rad. stress Syy in file usually named |syy.dat|.
+\item 16: Output results for tide-corrected depth grid in |depth.dat|
+\item 17: Output results for tide-corrected water depths in file usually
+named |depth.dat|.
+\item |iun(5)|: Unit for file containing {\em namelist} input data.  Usually
+named |indat.dat|.  This filename is specified in the standard program version.
+In the LRSS version, an arbitrary filename is entered on the command line.
+\end{itemize}
+
+Variable definitions.
+
+\begin{tabular}{cl}
+
+$mr,nr$   & reference grid dimensions (max $ixr,iyr$) \\
+$dxr,dyr$ & grid spacing for reference grid \\
+$iu$      & physical unit descriptor ( 1=mks, 2=english) \\
+          & default value is 1, mks units \\
+$dt$      & depth tolerence value (to check for anomalous depth values) \\
+$ispace$  & switch to control grid subdivision. \\
+          & =0, program attempts its own subdivisions \\
+          & =1, user specifies subdivisions \\
+$nd$      & $y$ direction subdivision ($ispace=0$ or 1)  \\
+          & (must be $.lt. iy/nr-1$)  \\
+$md(mr-1)$& $x$ direction subdivisions (if $ispace=1$)  \\
+           &       (must be $.le. ix-1$)  \\
+$ntype$    & nonlinearity control parameter  \\
+          &  =0, linear model  \\
+          & =1, Stokes matched to Hedges in shallow water  \\
+          & =2, Stokes throughout \\
+$icur$ & switch to tell program if current data is to be used and read on input  \\
+ & =0, no input current data  \\
+ & =1, input current data to be read   \\
+ & program defaults to $icur=0$  \\  
+$ibc$ & boundary condition switch  \\
+ &  =0, use closed lateral boundaries  \\
+ &  =1, use open lateral conditions  \\
+ &  program defaults to $ibc=0$  \\
+$dr$  & depths at reference grid points  \\
+ &  $>0$, submerged areas  \\
+ &  $<0$, elevation above surface datum  \\
+$ur$    &  $x$ velocities at reference grid points  \\
+ & (only entered if $icur=1$)  \\ 
+$vr$    &  $y$ velocities at reference grid points  \\
+ &  (only entered if $icur=1$) \\
+\end{tabular}
+
+Data is entered in |namelist| format from the data file |indat.dat|.
+
+Subroutine is called from |refdif1| and returns control to calling location,
+unless a fatal error is encountered during input data checking.
+ 
+\begin{center}
+    
+    Center for Applied Coastal Research\\
+    Department of Civil Engineering\\
+    University of Delaware\\
+    Newark, DE 19716
+
+\end{center}
+ 
+Coded by  James  T. Kirby, October 1984.  Revised July 1994.
+
+
+@a
+      subroutine inref
+  
+      include 'param.h'
+
+
+@<common statements@> 
+
+c  Standard file name choices:
+
+c  |fname1| = |refdat.dat|, reference grid data file.
+
+c  |fname2| = |outdat.dat|, standard output data file.
+
+c  |fname3| = |subdat.dat|, user-specified subgrids.
+
+c  |fname4| = |wave.dat|, user-specified complex amplitude on row 1 (for |iinput|
+c  =2).
+
+c  |fname5| = |owave.dat|, complex amplitude on last row (for |ioutput| = 2).
+
+c  |fname6| = |surface.dat|, instantaneous water surface at computational
+c  resolution.
+
+c  |fname7| = |bottomu.dat|, magnitude of bottom velocity at reference grid
+c  points.
+
+c  |fname8| = |angle.dat|, wave directions at reference grid points.
+
+c  |fname9| = not used yet.
+
+c  |fname10| = |refdif1.log|, run log for |refdif1| program.
+
+c  |fname11| = |height.dat|, wave heights at reference grid locations.
+
+c  |fname12| = |sxx.dat|, Sxx components at reference grid locations.
+
+c  |fname13| = |sxy.dat|, Sxy components at reference grid locations.
+
+c  |fname14| = |syy.dat|, Syy components at reference grid locations.
+
+c  |fname15| = |depth.dat|, tide-corrected depths at reference grid locations.
+
+c  |fnamein| = |indat.dat|, input namelist file.
+
+
+      namelist /ingrid/ mr, nr, iu, ntype, icur, ibc, dxr, dyr, dt, ispace, 
+     1                  nd, iff, isp, iinput, ioutput
+     1         /inmd/  md
+     1         /fnames/ fname1,fname2,fname3,fname4,fname5,fname6,fname7,
+     1                  fname8,fname9,fname10,fname11,fname12,fname13,fname14,
+     1                  fname15
+
+ 
+c  Constants.
+  
+      g=9.80621
+
+@*1 Specify name of namelist data file.
+
+The LRSS implementation of Ref/Dif 1 imposes the restriction that no file names
+can be specified within the program itself.  This makes it necessary to read
+in at least one file name as a command line argument.  Two options are provided
+here by means of a subroutine |infile|.  The code for the subroutine is provided
+in either of the files
+
+\begin{enumerate}
+
+\item |infile1.f| - standard version.  The program assumes the name |indat.dat|.
+\item |infile2.f| - user specifies the file name using the |igetarg| command line
+syntax.
+
+\end{enumerate}
+
+The user of |refdif1| must copy the desired file to |infile.f| before compiling
+the program.  The |igetarg| structure is supported on Sun Fortran and may be 
+used at all times there.  The SGI version tested to date uses a subroutine
+library |liblrss.a| provided by SAIC.
+
+@a
+
+      call infile(fnamein)
+
+      iun(5)=5
+      open(unit=iun(5),file=fnamein,status='old')
+
+@*1 Read remaining file names from namelist.
+
+@a
+
+    
+      iun(1)=1
+      iun(2)=2
+      iun(3)=3
+
+      read(iun(5),nml=fnames)
+
+      open(unit=iun(1),file=fname1,status='old')
+      open(unit=iun(3),file=fname2)
+      open(9,file=fname8)
+      open(10,file=fname10)
+      open(12,file=fname11)
+
+      if (fname12.ne.' ' .and. fname13.ne.' ' .and. fname14.ne.' ')then
+      open(13,file=fname12)
+      open(14,file=fname13)
+      open(15,file=fname14)
+      endif
+
+      open(16,file=fname15)
+
+      if(fname7.ne.' ') open(17,file=fname7)
+
+      if(fname6.ne.' ') open(8,file=fname6)
+
+
+c  print headers on output
+    
+      write(10,120)
+        
+      write(10,106)
+  
+c  Read control data from unit |iun(5)|.
+
+      read(iun(5),nml=ingrid)
+  
+      if(ispace.eq.1) read(iun(5),nml=inmd)
+
+      write(10,107) mr,nr,dxr,dyr
+
+      if(iu.eq.1) write(10,114) iu
+      if(iu.eq.2) write(10,115) iu
+
+      if(icur.eq.0) write(10,200) 
+      if(icur.eq.1) write(10,201)
+
+      if(ibc.eq.0) write(10,202)
+      if(ibc.eq.1) write(10,203)
+
+      if(ispace.eq.0)write(10,108)
+      if(ispace.eq.1)write(10,109)
+
+      write(10,119) nd
+
+      if(ntype.eq.0) write(10,110)
+      if(ntype.eq.1) write(10,111)
+      if(ntype.eq.2) write(10,112)
+  
+c  Check input from unit |iun(5)|.
+  
+      if((mr.gt.ixr).or.(nr.gt.iyr)) then
+        write(10,*) 'dimensions for reference grid too large, stopping'
+        call exit(1)
+      end if
+
+      if((iu.ne.1).and.(iu.ne.2)) iu=1
+
+      dt=dt*dconv(iu)
+      dxr=dxr*dconv(iu)
+      dyr=dyr*dconv(iu)
+
+      if(dt.eq.0.) dt=2.
+
+      if(nd.gt.ifix(float(iy-1)/float(nr-1))) then
+        write(10,102)
+        call exit(1)
+      endif
+
+      if(ispace.eq.1) then
+        test=0.
+        do 1 i=1,mr-1
+        if(md(i).gt.(ix-1)) then
+          write(10,103) i
+          test=1.
+        endif
+ 1      continue
+      if(test.eq.1.) call exit(1)
+      endif
+    
+c     read depth grid and velocities from unit iun(1)
+    
+      do 2 i=1,mr
+      read(iun(1),101)(dr(i,j),j=1,nr)
+ 2    continue
+
+      if(icur.eq.1)then
+
+      do 3 i=1,mr
+      read(iun(1),101)(ur(i,j),j=1,nr)
+ 3    continue
+
+      do 4 i=1,mr
+      read(iun(1),101)(vr(i,j),j=1,nr)
+ 4    continue
+
+      endif
+    
+c     convert depth and currents
+    
+      do 5 i=1,mr
+      do 5 j=1,nr
+      dr(i,j)=dr(i,j)*dconv(iu)
+ 5    continue
+
+      if(icur.eq.1)then
+
+      do 55 i=1,mr
+      do 55 j=1,nr
+      ur(i,j)=ur(i,j)*dconv(iu)
+      vr(i,j)=vr(i,j)*dconv(iu)
+ 55   continue
+
+      endif
+    
+c     check for large depth changes and large currents in reference grid data.
+  
+      do 6 i=2,mr-1
+      do 6 j=2,nr-1
+      dcheck=(dr(i+1,j)+dr(i-1,j)+dr(i,j-1)+dr(i,j+1))/4.
+      if(abs(dcheck-dr(i,j)).gt.dt) write(10,104) dr(i,j), i,j,dt
+ 6    continue
+
+      if(icur.eq.1) then
+      do 7 i=1,mr
+      do 7 j=1,nr
+      if(dr(i,j).le.0.0) go to 7
+      fr=(ur(i,j)*ur(i,j)+vr(i,j)*vr(i,j))/(g*dr(i,j))
+      if(fr.gt.1.) write(10,105) i,j,fr
+ 7    continue
+      endif
+    
+c  Establish coordinates for reference grid.
+    
+      do 8 ir=1,mr
+      xr(ir)=float(ir-1)*dxr
+ 8    continue
+
+      do 9 jr=1,nr
+      yr(jr)=float(jr-1)*dyr
+ 9    continue
+    
+c  Establish |y| coordinates for interpolated grid.
+    
+      n=nd*(nr-1)+1
+      dy=dyr/float(nd)
+      do 10 j=1,n
+      y(j)=float(j-1)*dy
+ 10   continue
+  
+c  Write grid information on output unit |iun(3)|.
+  
+      write(iun(3),*) nr,mr
+      write(iun(3),*) (yr(jr)/dconv(iu),jr=1,nr)
+      
+c  Check friction values.
+ 
+c         |iff(1)=1|, turbulent boundary layer damping everywhere
+
+c         |iff(2)=1|, porous bottom damping everywhere
+
+c         |iff(3)=1|, laminar boundary layer damping everywhere
+      
+      do 11 i=1,3
+      if((iff(i).ne.0).and.(iff(i).ne.1)) iff(i)=0
+ 11   continue
+      write(10,116)(iff(i),i=1,3)
+
+c   Specify whether or not user specified subgrids are to be read in during 
+c  model operation.
+
+c     |isp=0|, no subgrids specified
+
+c     |isp=1|, subgrids to be read in later from unit |iun(2)|
+      
+      if(isp.eq.0) write(10,117)
+      
+      if(isp.eq.1) then
+      write(10,118)
+      open(unit=iun(2),file=fname3,status='old')
+      endif
+
+      if((isp.eq.1).and.(ispace.eq.0))write(10,113)
+
+      if(isp.eq.0)then
+
+      do 14 ir=1,mr
+      do 14 jr=1,nr
+      isd(ir,jr)=0
+ 14   continue
+
+      else
+
+      do 15 ir=1,mr-1
+      read(iun(2),100)(isd(ir,jr),jr=1,nr-1)
+ 15   continue
+
+      endif
+    
+c  Input done, return to main program.
+    
+      return
+
+ 100  format(15i4)
+ 101  format(20f10.4)
+ 102  format(' y-direction subdivision too fine.'/
+     1' maximum number of y grid points will be exceeded.'/
+     1' execution terminating.')
+ 103  format(' x-direction subdivision too fine on grid block'
+     1,2x,i3/' execution terminating')
+ 104  format(' depth',2x,f7.2,'(m) at reference grid location',
+     12(2x,i3)/' differs from the average of its neighbors by',
+     1' more than',2x,f7.2,'(m).'/' execution continuing')
+ 105  format(' ambient current at reference grid location'
+     1,2(2x,i3),' is supercritical with froude number =',f7.4/
+     1' execution continuing')
+ 106  format('0'///20x,'input section, reference grid values'///)
+ 107  format(' reference grid dimensions  mr=',i3/
+     1       '                            nr=',i3///
+     1       ' reference grid spacings   dxr=',f8.4/
+     1       '                           dyr=',f8.4)
+ 108  format(' '/' ispace =0 chosen, program will attempt its own ',
+     1'reference grid subdivisions')
+ 109  format(' '/' ispace =1 chosen, subdivision spacings will be',
+     1' input as data')
+ 110  format(' '/' ntype = 0, linear model')
+ 111  format(' '/' ntype = 1, stokes model matched to hedges model')
+ 112  format(' '/' ntype = 2, stokes model')
+ 113  format(' warning: input specifies that user will be supplying',
+     1' specified subgrids (isp=1),'/
+     1' while program has been told to generate its own subgrid',
+     1' spacings (ispace=0).'/
+     1' possible incompatibility in any or all subgrid blocks')
+ 114  format(' '/' physical unit switch iu=',i1,
+     1',  input in mks units')
+ 115  format(' '/' physical unit switch iu=',i1,
+     1',  input in english units')
+ 116  format(' '//'   switches for dissipation terms'//
+     1' ',i1,'   turbulent boundary layer'/
+     1' ',i1,'   porous bottom'/
+     1' ',i1,'   laminar boundary layer')
+ 120  format(//////20x,'Refraction-Diffraction Model for'/
+     120x,'Weakly Nonlinear Surface Water Waves'///
+     120x,'REF/DIF 1,  Version 2.5'///
+     120x,'Center for Applied Coastal Research'/
+     120x,'Department of Civil Engineering'/
+     120x,'University of Delaware'/
+     120x,'Newark, Delaware 19716'///
+     110x,'James T. Kirby and Robert A. Dalrymple, November 1994')
+
+ 117  format(' '/' isp=0, no user defined subgrids')
+ 118  format(' '/' isp=1, user defined subgrids to be read')
+ 119  format(' '/' y-direction subdivision according to nd=',i3)
+ 200  format(' '/' icur=0, no current values read from input files')
+ 201  format(' '/' icur=1, current values read from data files')
+ 202  format(' '/' ibc=0, closed (reflective) lateral boundaries')
+ 203  format(' '/' ibc=1, open lateral boundaries')
+
+      end
+
+    
+@*  INWAVE.
+ 
+Read in wave parameters.
+ 
+Variable definitions:
+
+\begin{tabular}{cl}
+ 
+$iinput$ &  determine method of specifying the first row of computational 
+            values  \\
+ & =1, input values from indat.dat according to value of $iwave$ \\
+ & =2, input complex a values from file $wave.dat$ \\
+$ioutput$ &  determine whether last row of complex amplitudes are stored in separate file $owave.dat$  \\
+ & =1, extra data not stored \\
+ & =2, extra data stored in file $owave.dat$  \\
+  &  \\
+if $iinput=1$: &  \\
+ $iwave$ &  input wave type \\
+& =1, input discrete wave amplitudes and directions \\
+& =2, read in dominant direction, total average energy density, and spreading factor \\
+ $nfreqs$ &      number of frequency components to be used
+                 (separate model run for each component) \\
+ $freqs$ &       wave frequency for each of $nfreqs$ runs  \\
+ $tide$ &        tidal offset for each of $nfreqs$ runs \\
+ 
+ if $iwave = 1$ &  \\
+ 
+ $nwavs$ &  number of discrete wave components at each of {\em nfreqs} runs \\
+ $amp$ &  initial amplitude of each component \\
+ $dir$ & direction of each discrete component in + or - degrees from the $x$-direction \\
+  &  \\
+  if $iwave = 2$  &  \\
+  $edens$ & total amplitude variance density over all directions at each frequency \\
+ $nsp=n$ &  spreading factor in $\cos^{2n}(\theta)$ directional distribution (stored in $nwavs$) \\
+ $nseed$ &  Seed value for random number generator.  Integer value between 0 and 9999. \\
+  &  \\			
+  if $iinput=2$: &  \\
+ $freqs$ &  Wave frequency for one run. \\
+ $tide$ & Tidal offset for one run. \\
+\end{tabular}
+
+All data is entered using the |namelist| convention.
+ 
+\begin{center}
+    
+    Center for Applied Coastal Research\\
+    Department of Civil Engineering\\
+    University of Delaware\\
+    Newark, DE 19716
+
+\end{center}
+ 
+Coded by James T. Kirby, Oct 1984, Sept 1989, Jan 1991, July 1994, November 1994.
+ 
+
+@a
+
+      subroutine inwave
+
+      include 'param.h'
+
+@<common statements@> 
+
+      namelist /waves1a/ iwave, nfreqs
+     1         /waves1b/ freqs, tide, nwavs, amp, dir
+     1         /waves1c/ thet0, freqs, tide, edens, nwavs, nseed    
+     1         /waves2/ freqin, tidein
+
+      pi=3.1415927
+    
+c  Values of |iinput|, |ioutput| already entered in namelist statement in 
+c  |inref|.
+    
+      if((iinput.ne.1).and.(iinput.ne.2))then
+      write(10,*)' invalid value chosen for iinput, check indat.dat'
+      stop
+      endif
+
+      if((ioutput.ne.1).and.(ioutput.ne.2))then
+      write(10,*)' invalid value chosen for ioutput, check indat.dat'
+      stop
+      endif
+
+      if(ioutput.eq.2)then
+      open(33,file=fname5)
+      endif
+
+      if(iinput.eq.1)then
+      write(10,*)' iinput = 1, program specifies initial row of a'
+    
+c  Enter |iwave|, |nfreqs| for |iinput = 1|.
+
+      read(iun(5), nml=waves1a)
+    
+      write(10,102)
+
+c  Enter data for case of |iinput=1, iwave=1|.
+
+      if(iwave.eq.1) then 
+
+      read(iun(5), nml=waves1b)
+      write(10,103)
+
+      endif
+
+c  Enter data for case of |iinput=1, iwave=2|.
+
+      if(iwave.eq.2) then
+    
+      read(iun(5), nml=waves1c)
+      write(10,104)
+
+      endif
+      write(10,105) nfreqs
+
+      if(iwave.eq.2) then
+
+      thet0=thet0*pi/180.
+      endif
+
+c  For each frequency, enter the wave period and tidal offset.
+    
+      do 3 ifreq=1,nfreqs
+
+      write(10,107) ifreq,freqs(ifreq),tide(ifreq)
+
+c  Convert angles to radians.
+
+      freqs(ifreq)=2.*pi/freqs(ifreq)
+      tide(ifreq)=tide(ifreq)*dconv(iu)
+    
+c  If |iwave = 1|, read the number of discrete components.
+    
+      if(iwave.eq.1) then
+
+      do 1 iwavs=1,nwavs(ifreq)
+
+      write(10,106) iwavs,amp(ifreq,iwavs),dir(ifreq,iwavs)
+
+      dir(ifreq,iwavs)=dir(ifreq,iwavs)*pi/180.
+      amp(ifreq,iwavs)=amp(ifreq,iwavs)*dconv(iu)
+ 1    continue
+
+      endif
+    
+c  If |iwave = 2|, read the parameters for each frequency.
+    
+      if(iwave.eq.2)then
+
+      seed=float(nseed)/9999.
+      write(10,108) edens(ifreq),nwavs(ifreq),nseed
+      dir(ifreq,1)=thet0
+      edens(ifreq)=edens(ifreq)*(dconv(iu)**2.)
+      endif
+
+ 3    continue
+
+      endif
+    
+c  If |iinput = 2|, read in wave period and tidal offset.
+    
+      if(iinput.eq.2)then
+
+      read(iun(5),nml=waves2)
+
+      freqs(1)=freqin
+      tide(1)=tidein
+
+      write(10,*)' iinput = 2, user specifies a in wave.dat'
+      nfreqs=1
+
+      write(10,102)
+      write(10,*)' wave period =',freqs(1),' sec.'
+      write(10,*)' tidal offset=',tide(1)
+      freqs(1)=2.*pi/freqs(1)
+      tide(1)=tide(1)*dconv(iu)
+      endif
+
+      return
+
+ 100  format(15i4)
+ 101  format(20f10.4)
+ 102  format('1'///20x,' input section, wave data values'///)
+ 103  format(' '///' iwave=1, discrete wave amps and directions')
+ 104  format(' '///' iwave=2, directional spreading model chosen')
+ 105  format(' '///' the model is to be run for',i3,' separate',
+     1' frequency components')
+ 106  format(' '/' wave component ',i2,', amplitude =',f8.4,
+     1', direction=',f8.4)
+ 107  format(' '//' frequency component ',i2//
+     1' wave period=',f8.4,'sec., tidal offset=',f8.4)
+ 108  format(' '/' total variance density =',f8.4,', spreading factor 
+     1n=',i2,' seed number =',i5)
+
+      end
+  
+@*  MODEL.
+
+This subroutine is the control level for the actual wave model.  Data read in 
+during |inref| and |inwave| is conditioned and passed to the wave model.  This 
+routine is executed once for each frequency component specified in |inwave|.
+
+The wave model is split in three parts which are run sequentially for each 
+reference grid row.
+
+\begin{tabular}{ll}
+  {\em grid} &  subroutine performs the interpolation of depth and current 
+values. \\
+{\em con} &  calculate the constants needed by the finite difference scheme. \\
+{\em fdcalc} &  perform the finite difference calculations. \\
+\end{tabular}
+
+\begin{center}
+    
+    Center for Applied Coastal Research\\
+    Department of Civil Engineering\\
+    University of Delaware\\
+    Newark, DE 19716
+
+\end{center}
+
+Coded by James T. Kirby, November 1984.
+
+Corrections made to specification of average |k| value on first row, April 5, 1993.
+ 
+Corrections and additions for LRSS compatibility, July-November 1994.
+ 
+@a
+ 
+      subroutine model
+
+      include 'param.h'
+
+@<common statements@> 
+
+      dimension dthi(31),thi(31),thet(iy)
+  
+c  Constants.
+
+      g=9.80621
+      rho=1000.
+      pi=3.1415927
+      eps=1.0e-05
+    
+c  Execute model once for each frequency.
+
+c     |ifreq| is the controlling index value.
+    
+      do 200 ifreq=1,nfreqs
+      psibar=0.
+      write(10,203) ifreq
+    
+c  Specify initial nonlinear parameters for each run.
+    
+      if(ntype.eq.0) an=0.
+      if(ntype.ne.0) an=1.
+      if(ntype.ne.2) anl=0.
+      if(ntype.eq.2) anl=1.
+
+c   Calculate the mean |kb| on the first row, for use in specifying initial conditions.
+
+      npts=0
+      sumk=0.
+
+      do 10 jr=1,nr
+      d(1,jr)=dr(1,jr)+tide(ifreq)
+      call wvnum(d(1,jr),ur(1,jr),freqs(ifreq),k(1,jr),eps,
+     1icdw,1,1)
+
+      if(d(1,jr).gt.0.05) then
+        sumk=sumk+k(1,jr)
+        npts=npts+1
+      endif
+
+ 10   continue
+
+      kb(1)=sumk/float(npts)
+    
+c  Establish initial wave conditions for the |ifreq| frequency
+    
+      if(iinput.eq.1)then
+    
+c  Compute wave from data given in |indat.dat|.
+    
+        if(iwave.eq.1) then
+      
+c  |iwave.eq.1|, discrete components specified.
+   
+        do 3 j=1,n
+        a(1,j)=cmplx(0.,0.)
+        do 2 iwavs=1,nwavs(ifreq)
+        thet(j)=dir(ifreq,iwavs)*180./pi
+        a(1,j)=a(1,j)+amp(ifreq,iwavs)*cexp(cmplx(0.,kb(1)*sin(
+     1  dir(ifreq,iwavs))*y(j)))
+ 2      continue
+ 3      continue
+        write(9,202)(thet(j),j=1,n,nd)
+      else
+      
+c  |iwave.eq.2|, directional spreading model.
+      
+      sp=float(nwavs(ifreq))
+      nsp=nwavs(ifreq)
+      thmax=pi/4.
+      call acalc(thmax,nsp,a1)
+      edens(ifreq)=sqrt(edens(ifreq)/a1)
+      nn=31
+      ii=(nn-1)/2+1
+      seed=rand(seed)
+    
+c  Compute randomly distributed $\Delta\theta$'s.
+    
+      sum0=0.
+      do 12 i=1,nn
+      seed=rand(seed)
+      dthi(i)=seed
+      sum0=sum0+seed
+ 12   continue
+      xnorm=2.*thmax/sum0
+      do 101 i=1,nn
+        dthi(i)=dthi(i)*xnorm
+ 101  continue
+      thi0=-thmax
+      do 4 i=1,nn
+      thi0=thi0+dthi(i)
+      thi(i)=thi0-dthi(i)/2.
+      dth=dthi(i)
+      amp(ifreq,i)=edens(ifreq)*sqrt(dth)*sqrt(cos(thi(i)+dth/2.)
+     1**(2*nsp)+cos(thi(i)-dth/2.)**(2*nsp))
+ 4    continue
+      do 5 i=1,nn
+      ip1=i+1
+      seed=rand(seed)
+      dir(ifreq,ip1)=2.*pi*seed/100.
+ 5    continue
+      do 7 j=1,n
+      a(1,j)=cmplx(0.,0.)
+      do 6 i=1,nn
+      a(1,j)=a(1,j)+amp(ifreq,i)*cexp(cmplx(0.,kb(1)*sin(thi(i)-thet0)
+     1*y(j)+dir(ifreq,i+1)))*2.
+ 6    continue
+ 7    continue
+      endif
+      endif
+    
+c  If |iinput=2|, read |a| from data file |fname4|.
+    
+      if(iinput.eq.2)then
+      open(11,file=fname4)
+      read(11,*)(a(1,j),j=1,n)
+      close(11)
+      endif
+
+c  Store first row of wave heights on unit 12.
+
+      write(12,202)(2*cabs(a(1,j))/dconv(iu),j=1,n,nd)
+
+c  If |fname6| not null, store surface on file |fname6|.
+
+      x(1)=0
+
+      if(fname6.ne.' ') then
+
+      write(8,*) n
+      write(8,*) (y(j),j=1,n)
+      write(8,*) x(1)
+      write(8,*) (real(a(1,j)),j=1,n)
+
+      endif
+    
+c  Now execute model for the |ifreq| frequency over each of |mr|
+c  grid blocks.  |ir| is the controlling index value.
+      
+      do 100 ir=1,(mr-1)
+      
+c  Establish interpolated grid block for segment |ir|.
+      
+      call grid(ifreq,ir)
+  
+c  If |ir=1| write initial values on |iun(3)|.
+  
+      if(ir.eq.1) then
+
+      write(10,201) x(1)/dconv(iu),psibar
+      write(iun(3),*) x(1)/dconv(iu),psibar
+      write(iun(3),*)(a(1,j)/dconv(iu),j=1,n,nd)
+      write(16,202)(d(1,j)/dconv(iu),j=1,n,nd)
+      endif
+      
+c  Calculate constants for each grid block.
+      
+      call con(ifreq,ir)
+      
+c  Perform finite difference calculations.
+      
+      call fdcalc(ifreq,ir)
+      
+c  Grid block |ir| done, print output and go to next grid.
+      
+ 100  continue 
+
+      if(ioutput.eq.2)then
+      write(33,*)(a(m,j),j=1,n)
+      endif
+
+c  Termination for the |surface.dat| file.
+
+      if(fname6.ne.' ') then
+
+        x(1)=-100.
+        write(8,*) x(1)
+
+      endif
+      
+c  Model complete for the |ifreq| frequency component, go to the next frequency 
+c  component.
+      
+ 200  continue
+      
+c   Runs completed for all frequencies.  Return to end of main program.
+      
+      return
+
+ 201  format(' x=',f10.2,'  psibar=',f20.4)
+ 202  format(' ',200(f10.4))
+ 203  format('1',20x,'model execution, frequency',
+     1' component',i4//)
+
+      end
+
+@* GRID.
+
+Interpolate the depth and current grids for reference grid block |ir|.
+
+\begin{center}
+    
+    Center for Applied Coastal Research\\
+    Department of Civil Engineering\\
+    University of Delaware\\
+    Newark, DE 19716
+
+\end{center}
+
+Coded by  James  T. Kirby, October 1984.
+ 
+
+@a
+
+      subroutine grid(ifreq,ir)
+    
+      include 'param.h'
+
+@<common statements@> 
+
+c  Constants.
+
+      pi=3.1415927
+      eps=1.0e-05
+
+c  Perform $y$-interpolation on reference grid.
+
+c  Interpolate first row.
+
+      do 10 j=1,n,nd
+      d(1,j)=dr(ir,((j-1)/nd+1))
+      u(1,j)=ur(ir,((j-1)/nd+1))
+      v(1,j)=vr(ir,((j-1)/nd+1))
+ 10   continue
+
+      do 12 jj=2,nr
+      do 11 j=1,(nd-1)
+      jjj=nd*(jj-2)+(j+1)
+      d(1,jjj)=(dr(ir,jj)-dr(ir,jj-1))*y(jjj)/dyr
+     1+(yr(jj)*dr(ir,jj-1)-yr(jj-1)*dr(ir,jj))/dyr
+      u(1,jjj)=(ur(ir,jj)-ur(ir,jj-1))*y(jjj)/dyr
+     1+(yr(jj)*ur(ir,jj-1)-yr(jj-1)*ur(ir,jj))/dyr
+      v(1,jjj)=(vr(ir,jj)-vr(ir,jj-1))*y(jjj)/dyr
+     1+(yr(jj)*vr(ir,jj-1)-yr(jj-1)*vr(ir,jj))/dyr
+ 11   continue
+ 12   continue
+    
+c  Set number of $x$ points and define $x$ values.
+    
+      if(ispace.eq.0) then
+      
+c  |ispace=0|, program sets subdivisions.
+  
+      do 13 j=1,n
+      dref=d(1,j)+tide(ifreq)
+      if(dref.lt.0.001) dref=0.001
+      call wvnum(dref,u(1,j),freqs(ifreq),k(1,j),eps,icdw,1,j)
+ 13   continue
+
+      npts=0
+      sumk=0.
+      do 14 j=1,n
+      if(d(1,j).gt.0.05) then
+        sumk=sumk+k(1,j)
+        npts=npts+1
+      endif
+ 14   continue
+
+      kb(1)=sumk/float(npts)
+      alw=2.*pi/kb(1)
+      anw=dxr/alw
+      np=ifix(5.*anw)
+      if(np.lt.1) np=1
+      md(ir)=min((ix-1),np)
+      if(np.gt.(ix-1)) write(10,100) ir
+
+      endif
+    
+c     |ispace=1|, user specified subdivision.
+    
+      m=md(ir)+1
+      dx=dxr/float(md(ir))
+      do 15 i=1,m
+      x(i)=xr(ir)+float(i-1)*dx
+ 15   continue
+
+c     interpolate values on |m| row.
+    
+      do 16 j=1,n,nd
+      d(m,j)=dr(ir+1,((j-1)/nd+1))
+      u(m,j)=ur(ir+1,((j-1)/nd+1))
+      v(m,j)=vr(ir+1,((j-1)/nd+1))
+ 16   continue
+
+      do 18 jj=2,nr
+      do 17 j=1,(nd-1)
+      jjj=nd*(jj-2)+(j+1)
+      d(m,jjj)=(dr(ir+1,jj)-dr(ir+1,jj-1))*y(jjj)/dyr
+     1+(yr(jj)*dr(ir+1,jj-1)-yr(jj-1)*dr(ir+1,jj))/dyr
+      u(m,jjj)=(ur(ir+1,jj)-ur(ir+1,jj-1))*y(jjj)/dyr
+     1+(yr(jj)*ur(ir+1,jj-1)-yr(jj-1)*ur(ir+1,jj))/dyr
+      v(m,jjj)=(vr(ir+1,jj)-vr(ir+1,jj-1))*y(jjj)/dyr
+     1+(yr(jj)*vr(ir+1,jj-1)-yr(jj-1)*vr(ir+1,jj))/dyr
+ 17   continue
+ 18   continue
+    
+c     interpolate values in |x|-direction
+    
+      do 19 i=2,m-1
+      do 19 j=1,n
+      d(i,j)=(d(m,j)-d(1,j))*x(i)/dxr+(x(m)*d(1,j)-x(1)*d(m,j))/dxr
+      u(i,j)=(u(m,j)-u(1,j))*x(i)/dxr+(x(m)*u(1,j)-x(1)*u(m,j))/dxr
+      v(i,j)=(v(m,j)-v(1,j))*x(i)/dxr+(x(m)*v(1,j)-x(1)*v(m,j))/dxr
+ 19   continue
+    
+c  Add in user specified grid subdivisions (read from unit |iun(2)|).
+    
+      do 30 jr=1,nr-1
+      if(isd(ir,jr).eq.1) then
+      js=nd*jr+(1-nd)
+      jf=js+nd
+      read(iun(2),101)((d(i,j),j=js,jf),i=1,m)
+
+      if(icur.eq.1)then
+      read(iun(2),101)((u(i,j),j=js,jf),i=1,m)
+      read(iun(2),101)((v(i,j),j=js,jf),i=1,m)
+      endif
+
+      do 31 i=1,m
+      do 31 j=js,jf
+      d(i,j)=d(i,j)*dconv(iu)
+      u(i,j)=u(i,j)*dconv(iu)
+      v(i,j)=v(i,j)*dconv(iu)
+ 31   continue
+
+      end if
+
+ 30   continue
+    
+c  Add tidal offset to all rows and establish thin film.
+    
+      do 20 i=1,m
+      do 20 j=1,n
+      d(i,j)=d(i,j)+tide(ifreq)
+      if(d(i,j).lt.0.001) d(i,j)=0.001
+ 20   continue
+    
+c  Interpolation complete, return to |model|.
+    
+      return
+
+ 100  format(' model tried to put more spaces than allowed in',
+     1' grid block ',i3)
+ 101  format(20f10.4)
+
+      end
+
+@*  CON.
+
+Subroutine calculates constants for reference grid block |ir|.
+
+\begin{center}
+    
+    Center for Applied Coastal Research\\
+    Department of Civil Engineering\\
+    University of Delaware\\
+    Newark, DE 19716
+
+\end{center}
+
+
+Coded by  James  T. Kirby, October 1984.
+ 
+
+@a
+      subroutine con(ifreq,ir)
+    
+      include 'param.h'
+
+@<common statements@> 
+
+c  Constants.
+
+      eps=1.0e-05
+      g=9.80621
+    
+c  Calculate constants.
+    
+      do 1 i=1,m
+      do 1 j=1,n
+      call wvnum(d(i,j),u(i,j),freqs(ifreq),k(i,j),eps,icdw,i,j)
+      sig(i,j)=freqs(ifreq)-k(i,j)*u(i,j)
+      akd=k(i,j)*d(i,j)
+      q(i,j)=(1.+akd/(sinh(akd)*cosh(akd)))/2.
+      p(i,j)=q(i,j)*g*tanh(akd)/k(i,j)
+      dd(i,j)=(cosh(4.*akd)+8.-2.*(tanh(akd)**2))/(8.*(sinh(akd)**4.))
+      bottomu(i,j)=g*k(i,j)/(2*freqs(ifreq)*cosh(akd))
+ 1    continue
+  
+c  Calculate the dissipation term |w|.
+  
+      call diss
+  
+c  Calculate the mean |kb| on each row.
+  
+      do 11 i=1,m
+      npts=0
+      sumk=0.
+      do 10 j=1,n
+      if(d(i,j).gt.0.05) then
+        sumk=sumk+k(i,j)
+        npts=npts+1
+      endif
+ 10   continue
+      if(npts.eq.0)then
+      kb(i)=k(i,1)
+      else
+      kb(i)=sumk/float(npts)
+      endif
+ 11   continue
+
+      return
+
+      end
+
+@* FDCALC. 
+
+Perform the Crank-Nicolson finite-difference calculations on grid block |ir|.  
+Method is the implicit-implicit iteration used by  Kirby and Dalrymple(1983). 
+
+Parameters for use in determining the minimax approximation are defined here.
+  
+60 degree minimax coefficients.
+\begin{eqnarray}     
+a0=0.998214 \nonumber \\ 
+a1=-0.854229 \nonumber \\ 
+b1=-0.383283 \nonumber  
+\end{eqnarray}
+70 degree minimax coefficients.
+\begin{eqnarray}
+a0=0.994733  \nonumber \\
+a1=-0.890065 \nonumber \\ 
+b1=-0.451641 \nonumber 
+\end{eqnarray}
+80 degree minimax coefficients.
+\begin{eqnarray}
+a0=0.985273 \nonumber \\ 
+a1=-0.925464 \nonumber \\ 
+b1=-0.550974 \nonumber 
+\end{eqnarray}
+Pad\'{e} coefficients (refdif1-v2.3).     
+\begin{eqnarray}
+a0=1  \nonumber \\ 
+a1=-0.75 \nonumber \\
+b1=-0.25 \nonumber 
+\end{eqnarray}    
+Small angle coefficients (Radder's approximation).
+\begin{eqnarray}
+a0=1.\nonumber \\
+a1=-.5\nonumber \\
+b1=0.0\nonumber 
+\end{eqnarray}
+
+Coded by  James  T. Kirby, October 1984, January 1992, July 1992
+ 
+Note to first users of Version 2.4:  there is an unexplained and odd behavior
+in the minimax model when waves around islands are computed.  For this reason,
+the program distributed here has the coefficients for the Pad\'{e} model.
+
+@a
+  
+      subroutine fdcalc(ifreq,ir)
+
+      include 'param.h'
+
+@<common statements@> 
+
+      real kap,ksth1,ksth2
+      complex c1,c2,c3,cp1,cp2,cp3,ci,damp
+      complex ac(iy),bc(iy),cc(iy),rhs(iy),sol(iy)
+      dimension thet(iy), urs(iy)
+
+@<fdcalc statement functions@>
+
+
+c  Constants. 
+     
+c  70 degree minimax coefficients.
+c    
+c      a0=0.994733 
+c      a1=-0.890065  
+c      b1=-0.451641
+
+c  Pad\'{e} coefficients.
+
+      a0=1.0 
+      a1=-0.75 
+      b1=-0.25 
+
+c  Additional constants.
+
+      u2=1.0
+      kap=0.78
+      gam=0.4
+      omeg=freqs(ifreq)
+      pi=3.1415927
+      ci=cmplx(0.,1.)
+
+      cdamp=0.00025
+
+      alphn=0.
+      delta1=a1-b1
+      delta2=1+2.*a1-2.*b1
+
+c  Initialize breaking index if |ir = 1|.
+
+      if(ir.eq.1) then
+      ifilt=0
+        do 100 j=1,n
+        ibr(j)=0
+        wb(1,j)=cmplx(0.,0.)
+ 100    continue
+      endif
+
+c  Solution for |m| grid blocks in reference block |ir|.
+
+      do 200 i=1,(m-1)
+      ip1=i+1
+      it=1
+      ih=1
+
+c  r.h.s. of matrix equation. 
+
+      rhs(1)=cmplx(0.,0.)
+
+      do 1 j=2,(n-1)
+      rhs(j)=c1(i,j)*a(i,j)+c2(i,j)*a(i,j+1)+c3(i,j)*a(i,j-1)
+     1-dx*(w(i,j)+wb(1,j))*a(i,j)/2.
+     1-dx*cmplx(0.,1.)*an*anl*sig(i,j)*k(i,j)*k(i,j)*dd(i,j)*
+     1(1.-float(ibr(j)))*(cabs(a(i,j))**2.)*a(i,j)/2.
+     1-dx*cmplx(0.,1.)*(1.-float(ibr(j)))*an*(1.-anl)
+     1*sig(i,j)*((1.+f1(i,j)*k(i,j)*k(i,j)*(cabs(a(i,j))**2.)
+     1*dd(i,j))*tanh(k(i,j)*d(i,j)+f2(i,j)*k(i,j)*cabs(a(i,j)))
+     1/tanh(k(i,j)*d(i,j))-1.)*a(i,j)/2.
+ 1    continue
+
+      rhs(n)=cmplx(0.,0.)
+
+c  Return here for iterations. 
+  
+ 2    if(it.eq.1)ii=i
+      if(it.eq.2)ii=ip1
+
+c  Establish boundary conditions.
+
+      if(ibc.eq.1)then
+      ksth1=real((2.*(a(i,2)-a(i,1))/((a(i,2)+a(i,1))*dy))*cmplx
+     1(0.,-1.))
+      ksth2=real((2.*(a(i,n)-a(i,n-1))/((a(i,n)+a(i,n-1))*dy))*
+     1cmplx(0.,-1.))
+      bc(1)=cmplx(1.,ksth1*dy/2.)
+      cc(1)=-cmplx(1.,-ksth1*dy/2.)
+      bc(n)=-cmplx(1.,-ksth2*dy/2.)
+      ac(n)=cmplx(1.,ksth2*dy/2.)
+      else
+      bc(1)=cmplx(1.,0.)
+      cc(1)=-bc(1)
+      bc(n)=cmplx(1.,0.)
+      ac(n)=-bc(n)
+      endif
+
+c  Calculate dissipation in rows where breaking occurs. 
+
+      do 3 j=1,n
+
+      if(ibr(j).eq.1) wb(2,j)=cmplx(1.,0.)*0.15*cg(ip1,j)*
+     1(1.-(gam*d(ip1,j)/(2.*cabs(a(ii,j))))**2.)/d(ip1,j)
+
+      if(ibr(j).eq.0) wb(2,j)=cmplx(0.,0.)
+
+ 3    continue
+
+c  Coefficients for forward row. 
+
+      do 4 j=2,(n-1)
+
+      ac(j)=cp3(i,j)
+
+      bc(j)=cp1(i,j)+(dx/2.)*(w(i+1,j)+wb(2,j))+cmplx(0.,an*anl)*sig(i+1,j)
+     1*k(i+1,j)*k(i+1,j)*dd(i+1,j)*(cabs(a(ii,j))**2.)*(dx/2.)
+     1+cmplx(0.,an*(1.-anl))*sig(i+1,j)*(dx/2.)*((1.+f1(i+1,j)*
+     1k(i+1,j)*k(i+1,j)*(cabs(a(ii,j))**2.)*dd(i+1,j))*tanh(k(i+1,j)*
+     1d(i+1,j)+f2(i+1,j)*k(i+1,j)*cabs(a(ii,j)))/tanh(k(i+1,j)*d(i+1,j
+     1))-1.)
+
+      cc(j)=cp2(i,j)
+
+ 4    continue
+
+c  Update solution one step. 
+
+      call ctrida(1,n,ac,bc,cc,rhs,sol)
+      do 5 j=1,n
+      a(ip1,j)=sol(j)
+      sol(j)=cmplx(0.,0.)
+ 5    continue
+      if((it.eq.2).or.(ih.eq.2)) go to 8
+
+c  Check for start or stop of breaking in each row. 
+
+      do 6 j=1,n
+      urs(j)=2.*cabs(a(ip1,j))
+ 6    continue
+
+      isave1=0
+      isave2=0
+      do 7 j=1,n
+      iset=0
+      ireset=0
+
+      if(((urs(j)/d(ip1,j)).gt.kap).and.(ibr(j).eq.0)) iset=1
+
+      if(iset.eq.1) then
+        ibr(j)=1
+        isave1=1
+      end if
+
+      if(((urs(j)/d(ip1,j)).lt.gam).and.(ibr(j).eq.1)) ireset=1
+
+      if(ireset.eq.1) then
+        ibr(j)=0
+        isave2=1
+      end if
+
+ 7    continue
+
+      ih=2
+
+c  Redo initial calculation if breaking status changes. 
+
+      if((isave1.eq.1).or.(isave2.eq.1)) go to 2
+ 8    continue
+      if(it.eq.2) go to 9
+      it=2
+      go to 2
+
+ 9    continue 
+ 
+c  For Stokes model alone (|ntype.eq.2|), test to see whether Ursell 
+c  parameter is too large. 
+
+      if(ntype.eq.2) then
+      do 11 j=1,n
+      urs(j)=(cabs(a(ip1,j))/d(ip1,j))/((k(ip1,j)*d(ip1,j))**2)
+      if(urs(j).gt.0.5) write(10,204) urs(j),i,j
+ 11   continue
+      end if
+
+c  Roll back breaking dissipation coefficient at each row.
+
+      do 12 j=1,n
+      wb(1,j)=wb(2,j)
+ 12   continue
+
+c  Calculate reference phase function for surface plotting. 
+
+      psibar=psibar+(kb(ip1)+kb(i))*dx/2.
+
+c  Store plotted surface if requested.
+
+      if(fname6.ne.' ') then
+
+      write(8,*) x(ip1)
+      write(8,*)(real(a(ip1,j)*cexp(cmplx(0.,psibar))),j=1,n)
+
+      endif
+
+c  Start filter if breaking is occuring. 
+
+      do 13 j=1,n
+      if(ibr(j).eq.1)ifilt=1
+ 13   continue
+
+ 200  continue
+
+c Calculate wave angles at reference grid rows.   Note:  angles are not well 
+c defined in a directional, multicomponent sea, or where waves become short 
+c crested.  This routine was heavily modified by Raul Medina, University of 
+c Cantabria. 
+
+      do 15 j=1,n
+      if(a(m,j).eq.(0.,0.)) then
+          akx2=0.
+      else
+          akx2=aimag(clog(a(m,j)))
+      endif
+      if(a(m-1,j).eq.(0.,0.)) then
+          akx1=0.
+      else
+          akx1=aimag(clog(a(m-1,j)))
+      endif
+      if(abs(akx2-akx1).gt.pi)then
+      akx=sign((2.*pi-(abs(akx1)+abs(akx2)))/dx,akx1)
+      else
+      akx=(akx2-akx1)/dx
+      endif
+      if(j.ne.n) then
+          if(a(m,j+1).eq.(0.,0.)) then
+              aky2=0.
+          else
+              aky2=aimag(clog(a(m,j+1)))
+          endif
+          if(a(m,j).eq.(0.,0.)) then
+              aky1=0.
+          else
+              aky1=aimag(clog(a(m,j)))
+          endif
+      else
+          if(a(m,j).eq.(0.,0.)) then
+              aky2=0.
+          else
+              aky2=aimag(clog(a(m,j)))
+          endif
+          if(a(m,j-1).eq.(0.,0.))then
+              aky1=0.
+          else
+              aky1=aimag(clog(a(m,j-1)))
+          endif
+      endif
+      if(abs(aky2-aky1).gt.pi)then
+          aky=sign((2.*pi-(abs(aky1)+abs(aky2)))/dy,aky1)
+      else
+          aky=(aky2-aky1)/dy
+      endif
+      thet(j)=atan2(aky,(akx+kb(m)))
+      thet(j)=180.*thet(j)/pi
+ 15   continue
+
+c  Print out |abs(a)| at grid reference points on unit |iun(4)|. 
+
+      mm1=m-1
+      write(10,205) (ir+1),mm1
+      write(10,202) x(m)/dconv(iu), psibar
+
+c  Wave heights on |height.dat|.
+
+      write(12,203) (2.*cabs(a(m,j))/dconv(iu),j=1,n,nd)
+
+c  Wave angles on |angle.dat|.
+
+      write(9,203) (thet(j),j=1,n,nd)
+
+c  Water depths on |depth.dat|.
+
+      write(16,203) (d(m,j)/dconv(iu),j=1,n,nd)
+
+c  Bottom velocities on |bottomu.dat|.
+
+      if(fname7.ne.' ') then
+      do 16 j=1,n,nd
+      bottomu(m,j)=bottomu(m,j)*cabs(a(m,j))
+ 16   continue
+      write(17,203) (bottomu(m,j)/dconv(iu),j=1,n,nd)
+      endif
+
+c  Write out reference grid data on disk file |iun(3)|. 
+
+      write(iun(3),*) x(m)/dconv(iu),psibar
+      write(iun(3),*)(a(m,j)/dconv(iu),j=1,n,nd)
+
+c  Roll back solution to first grid level.
+ 
+      do 201 j=1,n
+      a(1,j)=a(m,j)
+ 201  continue
+
+      return
+
+ 202  format(' x=',f10.2,'    reference phase psibar=',f20.4)
+ 203  format(' ',200(f10.4))
+ 204  format(' '//' warning: Ursell number =',f10.4,' encountered at',
+     1'grid location',i6,',',i6/
+     1' should be using Stokes-Hedges model (ntype=1) due to shallow',
+     1'water')
+ 205  format(' grid row ir=',i3,',  ',i3,' x-direction subdivisions',
+     1' used')
+
+      end
+
+@*1 FDCALC statement functions.
+
+The following code provides the statement functions used in establishing the 
+tridiagonal matrix structure used in |fdcalc|.
+
+@<fdc...@>=
+
+      cg(i,j)=sqrt(p(i,j)*q(i,j))
+
+      pv(i,j)=p(i,j)-v(i,j)*v(i,j)
+
+      bet(i,j)=-4.*(k(i+1,j) - k(i,j))/(dx*((k(i+1,j) + k(i,j))**2)) 
+     1-4.*(k(i+1,j)*(p(i+1,j) -u(i+1,j)**2) - k(i,j)*(p(i,j)-u(i,j)**2)) / 
+     1(dx*((k(i+1,j) +  k(i,j))**2.)*(p(i+1,j) + p(i,j) - (u(i+1,j)**2 + 
+     1u(i,j)**2) ) )
+  
+      dv(i,j)=( cg(i+1,j) + u(i+1,j) )/sig(i+1,j) - (cg(i,j)+u(i,j))/sig(i,j) 
+     1-delta1*dx*( (v(i+1,j+1)/sig(i+1,j+1)) + (v(i,j+1)/sig(i,j+1) ) 
+     1-(v(i+1,j-1)/sig(i+1,j-1))-(v(i,j-1)/sig(i,j-1)) )/(2.*dy)
+
+      damp(i,j)=2.*ci*cdamp*( (cg(i+1,j) + u(i+1,j)) + (cg(i,j) + u(i,j)) )/ 
+     1 ( dy*dy*( k(i+1,j)**2 + k(i,j)**2 ) )
+
+      deltap(i,j)=a1-b1*kb(i)/k(i,j)
+
+      cp1(i,j)=(cg(i+1,j)+u(i+1,j))*cmplx(1.,dx*(kb(i+1)-a0*k(i+1,j))) 
+     1+cmplx(1.,0.)*(cg(i,j)+u(i,j)+dv(i,j)*(sig(i+1,j)+sig(i,j))/4.) 
+     1+2.*omeg*cmplx(0.,1.)*(-b1)*bet(i,j)*(u(i+1,j)+u(i,j))/sig(i+1,j) 
+     1+4.*omeg*(-b1)*cmplx(0.,1.)*(3.*(u(i+1,j)-u(i,j))/dx+(v(i+1,j+1) 
+     1+v(i,j+1)-v(i+1,j-1)-v(i,j-1))/(4.*dy))/(sig(i+1,j)*(k(i+1,j)+k(i,j))) 
+     1+cmplx(-2.*(-b1)/(dy*dy*(k(i+1,j)+k(i,j)))+b1*bet(i,j)*dx/(2.*dy*dy), 
+     1-deltap(i,j)*dx/(2.*dy*dy))*(pv(i+1,j+1)+2.*pv(i+1,j)+ 
+     1pv(i+1,j-1))/sig(i+1,j)-cmplx(1.,0.)*omeg*delta2*(3.*u(i+1,j) 
+     1+u(i,j))/(2.*sig(i+1,j))+ci*omeg*(a0-1.)*k(i+1,j)*u(i+1,j)*dx/sig(i+1,j) 
+     1+2.*ifilt*damp(i,j) +cmplx(1.,0.)*alphn*dx
+
+      cp2(i,j)=cmplx( (-delta1*dx)*(v(i+1,j) + v(i,j))/(2.*dy) 
+     1+b1*u2*bet(i,j)*(u(i+1,j)*v(i+1,j) + u(i,j)*v(i,j))/(dy*sig(i+1,j+1)), 
+     1(-delta1*u2)*(u(i+1,j+1)*v(i+1,j+1) + u(i,j+1)*v(i,j+1)+ 
+     12.*u(i+1,j)*v(i+1,j))/(2.*dy*sig(i+1,j+1))+dx*(-b1)*bet(i,j) 
+     1*(sig(i+1,j)*v(i+1,j)+sig(i,j)*v(i,j))/(2.*dy*sig(i+1,j+1))) 
+     1+cmplx(2.*(-b1)/(dy*dy*(k(i+1,j)+k(i,j)))+(-b1)*bet(i,j)*dx/(2.*dy*dy), 
+     1+deltap(i,j)*dx/(2.*dy*dy))*(pv(i+1,j+1) + pv(i+1,j))/sig(i+1,j+1) + 
+     14.*cmplx(0.,1.)*(-b1)*sig(i+1,j)*v(i+1,j)/(dy*sig(i+1,j+1)*(k(i+1,j) + 
+     1k(i,j))) -ifilt*damp(i,j)
+
+      cp3(i,j)=cmplx(-(-delta1*dx)*(v(i+1,j)+v(i,j))/(2.*dy)
+     1+(-b1)*u2*bet(i,j)*(u(i+1,j)*v(i+1,j)+u(i,j)*v(i,j))/(dy*sig(i+1,j-1)),
+     1 -(-delta1*u2)*(u(i+1,j-1)*v(i+1,j-1)+u(i,j-1)*v(i,j-1)+ 
+     12.*u(i+1,j)*v(i+1,j))/(2.*dy*sig(i+1,j-1))- 
+     1dx*(-b1)*bet(i,j)*(sig(i+1,j)*v(i+1,j) + sig(i,j) * v(i,j)) / 
+     1(2.*dy*sig(i+1,j-1))) +cmplx(2.*(-b1)/(dy*dy*(k(i+1,j) + k(i,j))) + 
+     1(-b1)*bet(i,j)*dx/(2.*dy*dy), -(-deltap(i,j)*dx) / (2.*dy*dy))*(pv(i+1,j) 
+     1+ pv(i+1,j-1))/sig(i+1,j-1)- 4.*cmplx(0.,1.)*(-b1)*sig(i+1,j)*v(i+1,j) / 
+     1(dy*sig(i+1,j-1)*(k(i+1,j)+k(i,j))) -ifilt*damp(i,j)
+
+      c1(i,j)=cmplx(cg(i+1,j)+u(i+1,j)-dv(i,j)*(sig(i+1,j) +sig(i,j))/4.,0.) + 
+     1cmplx(1.,-dx*(kb(i)-a0*k(i,j))) * (cg(i,j)+u(i,j)) + 
+     12.*cmplx(0.,1.)*omeg*(-b1)*bet(i,j)*(u(i+1,j) + u(i,j))/sig(i,j) +
+     14.*cmplx(0.,1.)*omeg*(-b1)*(3.*(u(i+1,j) - u(i,j))/dx+(v(i+1,j+1) + 
+     1v(i,j+1) - v(i+1,j-1) - v(i,j-1))/(4.*dy))/(sig(i,j)*(k(i+1,j) + k(i,j))) 
+     1+ cmplx(2.*b1/(dy*dy*(k(i+1,j)+k(i,j))) -b1 * bet(i,j) * 
+     1dx/(2.*dy*dy), +deltap(i,j)*dx/(2.*dy*dy))*(pv(i,j+1) + 
+     12.*pv(i,j)+pv(i,j-1))/sig(i,j) - cmplx(1.,0.)*omeg*delta2* 
+     1(3.*u(i+1,j)+u(i,j))/(2.*sig(i,j)) - ci*omeg* (a0-1.) * k(i,j) * 
+     1u(i,j)*dx/sig(i,j) + 2.*ifilt*damp(i,j) - cmplx(1.,0.)*alphn*dx
+
+      c2(i,j)=cmplx(delta1*dx*( v(i+1,j) + v(i,j) )/(2.*dy) 
+     1 + b1*u2*bet(i,j)*(u(i+1,j)*v(i+1,j) + u(i,j)*v(i,j))/(dy*sig(i,j+1)), 
+     1(-delta1*u2)*(u(i+1,j+1)*v(i+1,j+1) + u(i,j+1)*v(i,j+1) 
+     1+2.*u(i,j)*v(i,j))/(2.*dy*sig(i,j+1)) + 4.*(-b1)*sig(i,j)*v(i,j) / 
+     1(dy*(k(i+1,j) +k(i,j))*sig(i,j+1)) - dx*(-b1)*bet(i,j)*( 
+     1sig(i+1,j)*v(i+1,j) + sig(i,j)*v(i,j)) / ( 2.*dy*sig(i,j+1)  )) + 
+     1cmplx(2.*(-b1)/(dy*dy*( k(i+1,j) + k(i,j) )) + b1*bet(i,j)*dx/(2.*dy*dy),
+     1 (-deltap(i,j)*dx)/(2.*dy*dy))*(pv(i,j+1) + pv(i,j))/sig(i,j+1) - 
+     1ifilt*damp(i,j)
+
+      c3(i,j)=cmplx((-delta1*dx)*(v(i+1,j)+v(i,j))/(2.*dy) - b1*u2*bet(i,j) * 
+     1(u(i+1,j)*v(i+1,j) + u(i,j)*v(i,j))/(dy*sig(i,j-1)), (delta1*u2) * 
+     1(u(i+1,j-1) * v(i+1,j-1) + u(i,j-1)*v(i,j-1) +2.*u(i,j)*v(i,j))/( 
+     12.*dy*sig(i,j-1) ) - 4.*(-b1)*sig(i,j)*v(i,j)/(dy*(k(i+1,j) + 
+     1k(i,j))*sig(i,j-1)) + dx*(-b1)*bet(i,j)*(sig(i+1,j)*v(i+1,j) + 
+     1sig(i,j)*v(i,j))/(2.*dy*sig(i,j-1))) + cmplx(-2.*b1/(dy*dy*( k(i+1,j) + 
+     1k(i,j) )) + b1*bet(i,j)*dx/(2.*dy*dy), (-deltap(i,j)*dx) / (2.*dy*dy)) *
+     1 ( pv(i,j) + pv(i,j-1) )/sig(i,j-1)-ifilt*damp(i,j)
+
+      f1(i,j)=tanh(k(i,j)*d(i,j))**5.
+
+      f2(i,j)=(k(i,j)*d(i,j)/sinh(k(i,j)*d(i,j)))**4.
+
+@* CTRIDA. 
+ 
+Tridiagonal matrix solution by double sweep algorithm. Present
+ subroutine adopted from the subroutine described in:
+ 
+Carnahan, Luther and Wilkes, {\em Applied Numerical Methods}, Wiley, 1969
+ 
+The original subroutine has been modified to handle complex array coefficients and solution values.  Input and output are
+
+\begin{tabular}{ll}
+$a,b,c$  & coefficients of row in tridiagonal matrix \\
+$d$ &  right hand side vector of matrix equation \\
+$v$ &  solution vector  \\
+$ii,l$ &  beginning and end indices of positions in the dimensioned range of the column vector. \\
+\end{tabular}
+ 
+\begin{center}
+    
+    Center for Applied Coastal Research\\
+    Department of Civil Engineering\\
+    University of Delaware\\
+    Newark, DE 19716
+
+\end{center}
+ 
+Coded by James  T. Kirby, September 1984.
+
+
+@a 
+  
+      subroutine ctrida(ii,l,a,b,c,d,v)
+
+      include 'param.h'
+
+      complex a(iy),b(iy),c(iy),d(iy),v(iy),beta(iy),gamma(iy)
+  
+c  Compute intermediate vectors |beta| and |gamma|.
+  
+      beta(ii)=b(ii)
+      gamma(ii)=d(ii)/beta(ii)
+      iip1=ii+1
+
+      do 1 i=iip1,l
+      beta(i)=b(i)-a(i)*c(i-1)/beta(i-1)
+      gamma(i)=(d(i)-a(i)*gamma(i-1))/beta(i)
+ 1    continue
+  
+c  Compute solution vector |v|.
+  
+      v(l)=gamma(l)
+      last=l-ii
+
+      do 2 k=1,last
+      i=l-k
+      v(i)=gamma(i)-c(i)*v(i+1)/beta(i)
+ 2    continue
+
+      return
+
+      end
+    
+@*  DISS.
+
+Subroutine calculates the dissipation at a single grid point based on values of the switch |iw| at that point.
+ 
+\begin{center}
+    
+    Center for Applied Coastal Research\\
+    Department of Civil Engineering\\
+    University of Delaware\\
+    Newark, DE 19716
+
+\end{center}
+ 
+Coded by  James  T. Kirby,  October 1984.
+ 
+
+@a
+    
+      subroutine diss
+
+      include 'param.h'
+
+@<common statements@> 
+
+      real nu,cp,kd
+
+c  Statement function.
+
+      sq(i,j)=sqrt(nu/(2.*sig(i,j)))
+
+c  Constants.
+
+      nu=1.3e-06
+      cp=4.5e-11
+      g=9.80621
+      pi=3.1415927
+    
+c     Value of |f| here is value assuming $\tau=(f/8)u^{2}$.
+
+c     $f=4 f_w$ ; $f_w$ is the wave friction factor
+
+      f=0.01*4.0
+    
+      do 1 j=1,n
+      do 1 i=1,m
+      w(i,j)=cmplx(0.,0.)
+      kd=k(i,j)*d(i,j)
+  
+c     If |iff(1) = 1|, use turbulent boundary layer damping.
+  
+      if(iff(1).eq.1) w(i,j)=2.*f*cabs(a(1,j))*sig(i,j)*k(i,j)/
+     1(sinh(2.*kd)*sinh(kd)*3.*pi)
+    
+c  If |iff(2) = 1|, add porous bottom damping.
+    
+      if(iff(2).eq.1) w(i,j)=w(i,j)+(g*k(i,j)*cp/(nu*(cosh(kd)**2)))
+     1 *cmplx(1.,0.)
+    
+c   If |iff(3) = 1|, add boundary layer damping.
+    
+      if(iff(3).eq.1) w(i,j)=w(i,j)+2.*k(i,j)*sig(i,j)*sq(i,j)
+     1*(1.+(cosh(kd)**2))*cmplx(1.,-1.)/sinh(2.*kd)
+ 1    continue
+
+      return
+
+      end
+  
+@*  RAND.
+
+Generate a floating point pseudo random number between 0 and 1 by the multiplicative congruential method.  see knuth, d.e., 1969, p. 155. 
+ 
+\begin{center}
+    
+    Center for Applied Coastal Research\\
+    Department of Civil Engineering\\
+    University of Delaware\\
+    Newark, DE 19716
+
+\end{center}
+ 
+Coded by Robert A. Dalrymple, January 1986.
+
+@a
+      function rand(x)    
+      ix=ifix(32767.*x)
+      irand=mod(4573*ix+6923,32767)
+      rand=float(irand)/32767.
+      return
+      end
+    
+@*  FACT.
+ 
+ compute the factorial of xi
+ 
+\begin{center}
+    
+    Center for Applied Coastal Research\\
+    Department of Civil Engineering\\
+    University of Delaware\\
+    Newark, DE 19716
+
+\end{center}
+ 
+Coded by Robert A.  Dalrymple, January 1986
+ 
+
+@a
+    
+ function fact(xi)
+
+      prod=1.
+      if (xi.gt.1.)then
+         do 17 ii=2,int(xi)
+           prod=prod*float(ii)
+  17     continue
+      endif
+
+      fact=prod
+
+      return
+
+      end 
+    
+@* BNUM.
+ 
+Compute the combination $in! / (n! (n-in)!)$.     
+ 
+\begin{center}
+    
+    Center for Applied Coastal Research\\
+    Department of Civil Engineering\\
+    University of Delaware\\
+    Newark, DE 19716
+
+\end{center}
+
+
+Coded by Robert A. Dalrymple, January 1986.
+ 
+
+@a
+      subroutine bnum(in,n,bn)    
+      xin=in
+      xt=fact(xin)
+      xb=fact(float(n))*fact(float(in-n))
+      bn=xt/xb
+
+      return
+
+      end   
+    
+@*  ACALC.  
+ 
+Calculate the normalization factor $a$ for the directional spectrum such that  $\int^{\theta_{m}}_{-\theta_{m}}\cos(\theta/2)^{2*nsp} d\theta=1$, where, in code, $\theta_{m}=$ |thmax| .
+ 
+\begin{center}
+    
+    Center for Applied Coastal Research\\
+    Department of Civil Engineering\\
+    University of Delaware\\
+    Newark, DE 19716
+
+\end{center}
+
+
+Coded by Robert A. Dalrymple, January 1986.
+ 
+@a
+    
+      subroutine acalc(thmax,nsp,a)
+
+      itn=2*nsp
+      call bnum(itn,nsp,bn)
+      a=thmax*bn/(2.**(itn-1))
+      sum=0.
+      do 10 ik=1,nsp
+        ki=ik-1
+        call bnum(itn,ki,bn)
+  10    sum=sum+bn*sin(float(nsp-ki)*thmax)/float(nsp-ki)
+      a=a+sum/(2.**(itn-2))
+
+      return
+
+      end      
+    
+@*  WVNUM. 
+ 
+Calculate wavenumber $k$ according to the form
+
+\begin{eqnarray}
+(\sigma-ku)^{2}=gk\tanh(kd) \nonumber
+\end{eqnarray}
+ 
+where
+
+\begin{tabular}{ll}
+$d$   & local water depth \\
+$s$ = $\sigma$   & absolute frequency \\
+$g$   & gravitational acceleration constant \\
+$u$   & $x$-component of ambient current \\
+$eps$ = $\epsilon$ & tolerance for iteration convergence \\
+$i,j$ & indices in finite-difference grid \\
+$icdw$ & switch \\
+&=0, no convergence failures encountered \\
+&=1, at least one convergence failure \\
+\end{tabular}
+ 
+Solution is by Newton-Raphson iteration using Eckart's approximation as a seed value.
+ 
+\begin{center}
+    
+    Center for Applied Coastal Research\\
+    Department of Civil Engineering\\
+    University of Delaware\\
+    Newark, DE 19716
+
+\end{center}
+ 
+Coded by James T. Kirby, September,1984
+ 
+@a
+      subroutine wvnum(d,u,s,k,eps,icdw,i,j)  
+
+      include 'param.h'
+
+      common/ref2/dr(ixr,iyr),ur(ixr,iyr),vr(ixr,iyr),iun(8),iinput,ioutput
+
+      real k,kn
+
+c  Constants.
+
+      g=9.806
+      pi=3.1415927
+      k=s*s/(g*sqrt(tanh(s*s*d/g)))
+
+c  Newton-Raphson iteration.
+
+      do 1 ii=1,20
+      f=s*s-2.*s*k*u+k*k*u*u-g*k*tanh(k*d)
+      fp=-2.*s*u+2.*k*u*u-g*tanh(k*d)-g*k*d/(cosh(k*d)**2.)
+      kn=k-f/fp
+      if((abs(kn-k)/kn).lt.eps)go to 2
+      k=kn
+ 1    continue
+      t=2.*pi/(sqrt(g*k*tanh(k*d))+k*u)
+      write(10,100)i,j,k,u,d,f,t
+      icdw=1
+
+      return
+
+ 2    k=kn
+
+      return
+
+ 100  format(' wavenumber iter. failed to converge on row',i10,
+     1'  column',i10/
+     1'      k=',f15.8,'      u=',f15.8/
+     1'      d=',f15.8,'      f=',f15.8/
+     1'      t=',f15.8)
+
+      end
+
+@* COMMON STATEMENTS.
+
+@<com...@>=
+
+      common/ref1/mr,nr,ispace,nd,md(ixr),iu,dconv(2),iff(3),icur,ibc
+      common/ref2/dr(ixr,iyr),ur(ixr,iyr),vr(ixr,iyr),iun(8),iinput,ioutput
+      common/ref3/dxr,dyr,xr(ixr),yr(iyr),x(ix),y(iy)
+      common/ref4/isd(ixr,iyr)
+      common/block1/d(ix,iy),u(ix,iy),v(ix,iy),m,n,dx,dy,ibr(iy)
+      common/con1/q(ix,iy),p(ix,iy),sig(ix,iy),bottomu(ix,iy)
+      common/con2/k(ix,iy),kb(ix),w(ix,iy),dd(ix,iy),wb(2,iy)
+      common/nlin/an,anl,ntype
+      common/wav1/iwave,nfreqs,freqs(ncomp),edens(ncomp),nwavs(ncomp)
+      common/wav2/amp(ncomp,ncomp),dir(ncomp,ncomp),tide(ncomp),seed,thet0
+      common/comp/a(ix,iy),psibar,ifilt
+      common/names/fname1,fname2,fname3,fname4,fname5,fname6,fname7,fname8,
+     1              fname9,fname10,fname11,fname12,fname13,fname14,fname15,
+     1              fnamein
+
+      real k, kb
+      complex w, a, wb
+      character*255 fname1,fname2,fname3,fname4,fname5,fname6,fname7,fname8,
+     1              fname9,fname10,fname11,fname12,fname13,fname14,fname15,
+     1              fnamein
+
+
+@* INDEX.
+

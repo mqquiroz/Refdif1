@@ -1,0 +1,144 @@
+Unix version for REF/DIF 1 - standalone version and LRSS module.
+
+This directory contains the following files which can be used to install
+REF/DIF 1 as a standalone program on a Unix machine:
+
+README.refdif1	-	This file. 
+
+refdif1v25.web	-	Web file for version 2.5 of REF/DIF 1.  This may be
+			processed using Krommes' FWEB program.
+
+refdif1v25.f	-	Version 2.5 of REF/DIF 1.
+
+infile1.f	-	code fragment needed in REF/DIF 1.  Should be linked
+			during final compilation.
+
+datgenv25.f	-	generate test data for version 2.5.
+
+indat-convertv25.f-	convert old (version 2.4 or earlier) indat.dat files
+			to version 2.5 indat.dat files.
+
+indat-createv25.f-	create new version 2.5 indat.dat files.
+
+surface.f	-	convert data file surface.dat to an ascii-formatted
+			file containing an image of the instantaneous water
+			surface on a regularly-spaced grid.
+
+param.h		-	include file containing dimensioning information.
+
+Makefile.regular-	file for building REF/DIF 1 using the Unix make
+			command. This should be copied to Makefile if the
+  			standard version of REF/DIF 1 is desired.
+
+In addition, the following files are needed in order to use REF/DIF 1 as an LRSS
+module:
+
+Makefile.lrss	-	This should be copied to Makefile if the LRSS version
+			is desired.  This file handles references to hdf and
+			extra Fortran libraries provided by SAIC for use in
+			LRSS.
+
+infile2.f	-	code fragment required by REF/DIF 1 (replaces infile1.f
+			above).
+
+lrss2rf.f	-	Read HDF formatted bathymetry data file and create the
+			ASCII reference grid data file (usually named 
+			refdat.dat).  Read the namelist file supplied by LRSS
+			and create the standard indat.dat namelist file.
+
+rf2hdf.f	-	Read all ascii array data files created by REF/DIF 1
+			and convert them to HDF files for LRSS. 
+
+********************************************************************************
+
+In order to compile the software, the following options are available:
+
+
+
+(regular version)
+
+make refdif1	-	compile refdif1 by itself.
+
+make datgen	-	compile datgen by itself.
+
+make surface	- 	compile surface by itself.
+
+make indat-create-	compile indat-createv25 by itself.
+
+make indat-convert-	compile indat-convertv25 by itself.
+
+make all	-	compile refdif1, datgen, surface
+
+make clean	-	remove .o object files.
+
+
+
+(LRSS version)
+
+make lrss2rf	-	compile lrss2rf by itself. 
+
+make refdif1	-	compile refdif1 by itself.
+
+make rf2hdf	-	compile rf2hdf by itself.
+
+make all	-	compile refdif1, lrss2rf, rf2hdf
+
+make clean	-	remove .o object files.
+
+********************************************************************************
+
+Running regular version:
+
+Please see users' manual for the standard file name conventions.
+
+********************************************************************************
+
+Running LRSS version:
+
+The LRSS version is run in three steps: preprocessing, model run, and post-
+processing.
+
+(0)  Compiling:      copy Makefile.lrss to Makefile and do
+		
+		make all
+
+(1)  Preprocessing:  It is assumed that an HDF bathymetry grid is in an
+                     arbitrarily named file which we denote here as gridfilein,
+		     and that a namelist file denoted here by datafilein has
+		     been created using the instructions in lrss2rf.f.
+		     Then, the preprocessing is done by
+
+		lrss2rf datafilein 
+
+		     This generates two files, datafileout, which is the 
+		     namelist file usually named
+		     indat.dat, and gridfileout, which is the ascii bathymetry 
+		     file usually named refdat.dat.  The filename datafileout is
+		     then incorporated into a single item namelist file (say,
+		     run.dat), with the structure
+
+		 $lrss_name
+		 datafileout
+		 $end
+
+(2)  Model run:      The model is then run using
+
+		refdif1 run.dat
+
+(3)  Postprocessing: The rf2hdf program is run using
+
+		rf2hdf run.dat
+
+*******************************************************************************
+
+Please address questions to:
+
+James T. Kirby
+Center for Applied Coastal Research
+University of Delaware
+Newark, DE 19716
+
+(302) 831-2438, FAX: (302) 831-1228, kirby@coastal.udel.edu
+
+
+Last revision 11/27/94.

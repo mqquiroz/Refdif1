@@ -1,0 +1,74 @@
+#  Makefile.regular
+#
+#  Makefile for the program REF/DIF 1, regular configuration.
+#
+#  James T. Kirby
+#  Center for Applied Coastal Research
+#  University of Delaware
+#  Newark, DE 19716
+#  (302) 831-2438, FAX (302) 831-1228
+#  kirby@coastal.udel.edu
+#
+#  The main thing here is that we want to make sure that all programs
+#  are up to date relative to param.h, which is used to dimension arrays
+#  in the main program and in the pre- and post processors
+
+#  Note that commands are included for executing ftangle and fweave for
+#  the web file version of refdif1v25.  If the fortran source is being used as
+#  the starting point rather than the web file, these lines should be commented.
+
+#  Last revision 11/26/94.
+
+#  Build everything.
+
+all:  refdif1 datgen surface
+
+#  Build REF/DIF 1.
+
+refdif1: refdif1v25.o infile1.o param.h
+	f77 -o refdif1 refdif1v25.o infile1.o 
+refdif1v25.o: refdif1v25.f param.h
+	f77 -c -O refdif1v25.f
+refdif1v25.f: refdif1v25.web
+	ftangle refdif1v25
+	fweave refdif1v25
+
+
+#  Build datgen.
+
+datgen:  datgenv25.o infile1.o param.h
+	f77 -o datgen datgenv25.o infile1.o
+datgenv25.o: datgenv25.f param.h
+	f77 -c -O datgenv25.f
+
+#  Build indat-create.
+
+indat-create: indat-createv25.o infile1.o param.h
+	f77 -o indat-create indat-createv25.o infile1.o
+indat-createv25.o: indat-createv25.f param.h
+	f77 -c -O indat-createv25.f
+
+#  Build indat-convert.
+
+indat-convert: indat-convertv25.o infile1.o param.h
+	f77 -o indat-convert indat-convertv25.o infile1.o
+indat-convertv25.o: indat-convertv25.f param.h
+	f77 -c -O indat-convertv25.f
+
+#  Build surface.
+
+surface: surface.o param.h
+	f77 -o surface surface.o
+surface.o: surface.f param.h
+	f77 -c -O surface.f
+
+#  Take care of infile1.f
+
+infile1.o: infile1.f
+	f77 -c -O infile1.f
+
+
+#  Clean up the directory.
+
+clean:
+	rm *.o
